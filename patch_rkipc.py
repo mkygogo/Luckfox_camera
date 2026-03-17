@@ -20,6 +20,8 @@ def patch_rkipc_ini(mode="native", resolution="720"):
         config = re.sub(r"dst_frame_rate_num\s*=\s*\d+", "dst_frame_rate_num = 15", config)
         config = re.sub(r"src_frame_rate_num\s*=\s*\d+", "src_frame_rate_num = 15", config)
         config = re.sub(r"rc_mode\s*=\s*\w+", "rc_mode = VBR", config)
+        #强制设置 GOP，确保每秒都有关键帧，拯救 FFmpeg 的切片强迫症！
+        config = re.sub(r"gop\s*=\s*\d+", "gop = 15", config)
 
         # 3. 核心：双模切换逻辑
         if mode == "native":

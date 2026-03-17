@@ -74,7 +74,12 @@ class RTSPRecorder:
                 'Content-Length': str(content_length)
             }
             
+            # ==========================================
+            # 🛡️ 终极绝杀装甲：无限次网络自愈 + Wi-Fi 假死急救
+            # ==========================================
             attempt = 1
+            ping_fail_count = 0  # 👈 新增：连续 ping 失败计数器
+            
             while True:
                 print(f"🔄 [网络守护] 准备第 {attempt} 次投递...")
                 
@@ -85,11 +90,24 @@ class RTSPRecorder:
                 ping_res = os.system(f"ping -c 1 -W 1 {target_ip} >/dev/null 2>&1")
                 
                 if ping_res != 0:
+                    ping_fail_count += 1 # 👈 失败次数 +1
                     print(f"⚠️ [硬件掉电] 无法连接到网络枢纽 ({target_ip})，等待 Wi-Fi 重连 (5秒)...")
+                    
+                    # 👇 核心除颤逻辑：如果连续 12 次 (约 1 分钟) 都不通，说明 Wi-Fi 假死了！
+                    if ping_fail_count >= 12:
+                        print("⚡ [网络急救] 侦测到 Wi-Fi 假死，正在对无线网卡进行物理重启除颤！")
+                        os.system("ifconfig wlan0 down && sleep 2 && ifconfig wlan0 up")
+                        ping_fail_count = 0 # 重置计数器，再给它 1 分钟机会
+                        
                     time.sleep(5)
                     if not self.gateway:
                         self.gateway = os.popen("ip route show default | awk '/default/ {print $3}'").read().strip()
                     continue 
+                
+                # 走到这里说明网络通了，清零计数器
+                ping_fail_count = 0 
+                
+                req = urllib.request.Request(self.server_url, data=MemoryStream(), headers=headers, method='POST')
                 
                 req = urllib.request.Request(self.server_url, data=MemoryStream(), headers=headers, method='POST')
 
@@ -171,17 +189,29 @@ class RTSPRecorder:
                 
                 files = sorted(glob.glob(os.path.join(self.save_dir, self.ext)))
                 
-                # 👇 🛡️ 内存盘防爆保护：如果断网导致 /tmp 堆积超过 3 个文件 (约 9MB)
-                # 强行删除最老的文件，绝不让 Linux 内存溢出 (OOM)
-                if self.mode == "ffmpeg" and len(files) > 3:
-                    try:
-                        print(f"⚠️ [内存保护] 断网堆积过多，强行丢弃极老视频: {files[0]}")
-                        os.remove(files[0])
-                        if os.path.basename(files[0]) in self.uploaded_files:
-                            self.uploaded_files.remove(os.path.basename(files[0]))
-                        files = files[1:] # 更新文件列表
-                    except Exception as e:
-                        pass
+                if self.mode == "ffmpeg":
+                    # 防线 1: 数量堆积过多 (断网导致)
+                    if len(files) > 5:
+                        try:
+                            print(f"⚠️ [内存保护] 断网堆积过多，强行丢弃极老视频: {files[0]}")
+                            os.remove(files[0])
+                            if os.path.basename(files[0]) in self.uploaded_files:
+                                self.uploaded_files.remove(os.path.basename(files[0]))
+                            files = files[1:] # 更新文件列表
+                        except: pass
+                        
+                    # 👇 防线 2 (新增): 检测“切片失效”导致的单个巨无霸文件！
+                    # 如果正在写的唯一文件超过了 15MB (大约 3 分钟)，说明底层卡死了，立刻断臂求生！
+                    if len(files) > 0 and os.path.getsize(files[-1]) > 15 * 1024 * 1024:
+                        print(f"⚠️ [致命警报] 检测到视频切片失效，体积已达 {os.path.getsize(files[-1])/1024/1024:.2f}MB！")
+                        print("⚡ 正在强行重启 FFmpeg 引擎以拯救 Linux 内存...")
+                        if process:
+                            process.terminate()
+                        time.sleep(1)
+                        try:
+                            os.remove(files[-1]) # 毫不犹豫地干掉巨无霸
+                        except: pass
+                
 
                 # 如果正在录像，永远排除最新生成的那 1 个文件，防止文件读写冲突
                 if is_running:
