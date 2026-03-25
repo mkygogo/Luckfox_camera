@@ -5,8 +5,16 @@ import socket
 import struct
 
 # ================= 配置区 =================
-SSID = "HUAWEI-JR"
-PASSWORD = "jr825319"
+#SSID = "HUAWEI-JR"
+#PASSWORD = "jr825319"
+#SSID = "GenAIXin"
+#PASSWORD = "80000003"
+#SSID = "MikeS24"
+#PASSWORD = "12345678"
+#SSID = "amd"
+#PASSWORD = "12345678"
+SSID = "李金龙的P40"
+PASSWORD = "88888888"
 INTERFACE = "wlan0"  # 默认的无线网卡名称
 CONF_FILE = "/etc/wpa_supplicant.conf"
 NTP_SERVER = "ntp.aliyun.com"  # 阿里云 NTP 服务器
@@ -62,7 +70,8 @@ network={{
         try:
             with open("/etc/resolv.conf", "w") as f:
                 f.write("nameserver 114.114.114.114\n")  # 国内最稳定的 114 DNS
-                f.write("nameserver 192.168.3.1\n")      # 备用：你的路由器网关
+                f.write("nameserver 192.168.128.1\n")
+                f.write("nameserver 192.168.110.1\n")      # 备用：你的路由器网关
                 f.write("nameserver 8.8.8.8\n")          # 备用：谷歌 DNS
             print("✅ DNS 配置写入完成！")
         except Exception as e:

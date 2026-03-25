@@ -11,7 +11,8 @@ class RTSPRecorder:
     def __init__(self, mode="native", save_dir="./records", rtsp_url="rtsp://127.0.0.1/live/0"):
         self.mode = mode
         self.rtsp_url = rtsp_url
-        self.server_url = "http://192.168.3.6:8920/upload/"
+        #self.server_url = "http://192.168.110.93:8920/upload/"
+        self.server_url = " http://192.168.43.107:8920/upload/"
         self.uploaded_files = set() 
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
@@ -86,33 +87,31 @@ class RTSPRecorder:
                 if self.gateway:
                     os.system(f"route add default gw {self.gateway} dev wlan0 >/dev/null 2>&1")
                 
-                target_ip = self.gateway if self.gateway else "8.8.8.8"
-                ping_res = os.system(f"ping -c 1 -W 1 {target_ip} >/dev/null 2>&1")
+                # target_ip = self.gateway if self.gateway else "8.8.8.8"
+                # ping_res = os.system(f"ping -c 1 -W 1 {target_ip} >/dev/null 2>&1")
                 
-                if ping_res != 0:
-                    ping_fail_count += 1 # 👈 失败次数 +1
-                    print(f"⚠️ [硬件掉电] 无法连接到网络枢纽 ({target_ip})，等待 Wi-Fi 重连 (5秒)...")
+                # if ping_res != 0:
+                #     ping_fail_count += 1 # 👈 失败次数 +1
+                #     print(f"⚠️ [硬件掉电] 无法连接到网络枢纽 ({target_ip})，等待 Wi-Fi 重连 (5秒)...")
                     
-                    # 👇 核心除颤逻辑：如果连续 12 次 (约 1 分钟) 都不通，说明 Wi-Fi 假死了！
-                    if ping_fail_count >= 12:
-                        print("⚡ [网络急救] 侦测到 Wi-Fi 假死，正在对无线网卡进行物理重启除颤！")
-                        os.system("ifconfig wlan0 down && sleep 2 && ifconfig wlan0 up")
-                        ping_fail_count = 0 # 重置计数器，再给它 1 分钟机会
+                #     # 👇 核心除颤逻辑：如果连续 12 次 (约 1 分钟) 都不通，说明 Wi-Fi 假死了！
+                #     if ping_fail_count >= 12:
+                #         print("⚡ [网络急救] 侦测到 Wi-Fi 假死，正在对无线网卡进行物理重启除颤！")
+                #         os.system("ifconfig wlan0 down && sleep 2 && ifconfig wlan0 up")
+                #         ping_fail_count = 0 # 重置计数器，再给它 1 分钟机会
                         
-                    time.sleep(5)
-                    if not self.gateway:
-                        self.gateway = os.popen("ip route show default | awk '/default/ {print $3}'").read().strip()
-                    continue 
+                #     time.sleep(5)
+                #     if not self.gateway:
+                #         self.gateway = os.popen("ip route show default | awk '/default/ {print $3}'").read().strip()
+                #     continue 
                 
                 # 走到这里说明网络通了，清零计数器
-                ping_fail_count = 0 
-                
-                req = urllib.request.Request(self.server_url, data=MemoryStream(), headers=headers, method='POST')
+                # ping_fail_count = 0 
                 
                 req = urllib.request.Request(self.server_url, data=MemoryStream(), headers=headers, method='POST')
 
                 try:
-                    with urllib.request.urlopen(req, timeout=120) as response:
+                    with urllib.request.urlopen(req, timeout=15) as response:
                         ret_data = response.read().decode('utf-8')
                         try:
                             ret_json = json.loads(ret_data)
