@@ -5,20 +5,43 @@ import socket
 import struct
 
 # ================= 配置区 =================
-#SSID = "HUAWEI-JR"
-#PASSWORD = "jr825319"
+SSID = "HUAWEI-JR"
+PASSWORD = "jr825319"
 #SSID = "GenAIXin"
 #PASSWORD = "80000003"
 #SSID = "MikeS24"
 #PASSWORD = "12345678"
 #SSID = "amd"
 #PASSWORD = "12345678"
-SSID = "李金龙的P40"
-PASSWORD = "88888888"
+#SSID = "李金龙的P40"
+#PASSWORD = "88888888"
 INTERFACE = "wlan0"  # 默认的无线网卡名称
 CONF_FILE = "/etc/wpa_supplicant.conf"
 NTP_SERVER = "ntp.aliyun.com"  # 阿里云 NTP 服务器
+AUTO_REFRESH_STREAM_SERVICE = False  # Live relay mode should not restart rkipc after time sync.
 # ==========================================
+
+
+def get_interface_ip(interface_name):
+    result = subprocess.run(
+        f"ifconfig {interface_name}",
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return ""
+
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if "inet addr:" in line:
+            return line.split("inet addr:", 1)[1].split()[0]
+        if line.startswith("inet "):
+            parts = line.split()
+            if len(parts) >= 2:
+                return parts[1]
+
+    return ""
 
 def setup_wifi_and_time():
     print(f"🔄 准备连接 Wi-Fi: {SSID}...")
@@ -59,11 +82,15 @@ network={{
     # 4. 向路由器请求分配动态 IP
     print("🌐 正在向路由器请求 IP 地址...")
     result = subprocess.run(f"udhcpc -i {INTERFACE} -q", shell=True, stdout=subprocess.DEVNULL)
-    
-    if result.returncode == 0:
+    current_ip = get_interface_ip(INTERFACE)
+
+    if result.returncode == 0 or current_ip:
         print("\n🎉 Wi-Fi 连接成功！")
         print("你的板子现在的 IP 信息如下：")
-        subprocess.run(f"ifconfig {INTERFACE} | grep 'inet '", shell=True)
+        if current_ip:
+            print(f"IP: {current_ip}")
+        else:
+            subprocess.run(f"ifconfig {INTERFACE} | grep 'inet '", shell=True)
         
         # ================= 5. 强写 DNS (专治嵌入式系统不服) =================
         print("\n🛠️ 正在修复系统 DNS 解析...")
@@ -106,10 +133,12 @@ network={{
                 
                 print(f"✅ 纯 Python 对时成功！已校准为北京时间。")
                 
-                # 极其关键：对时成功后重启视频服务，刷新画面上的时间水印
-                print("🔄 正在刷新系统推流服务以更新时间戳水印...")
-                subprocess.run("RkLunch-stop.sh", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-                subprocess.run("RkLunch.sh &", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+                if AUTO_REFRESH_STREAM_SERVICE:
+                    print("🔄 正在刷新系统推流服务以更新时间戳水印...")
+                    subprocess.run("RkLunch-stop.sh", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+                    subprocess.run("RkLunch.sh &", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+                else:
+                    print("⏭️ 已跳过推流服务重启，保持当前 live relay 链路稳定。")
                 
             else:
                 print("⚠️ 收到空数据。")

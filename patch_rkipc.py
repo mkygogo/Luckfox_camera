@@ -1,6 +1,98 @@
 import re
 import sys
 
+
+def split_lines_with_endings(text):
+    return text.splitlines(keepends=True)
+
+
+def find_section_bounds(lines, section):
+    section_header = f"[{section}]"
+    start_index = None
+
+    for index, line in enumerate(lines):
+        if line.strip() == section_header:
+            start_index = index
+            break
+
+    if start_index is None:
+        raise ValueError(f"未找到配置节: [{section}]")
+
+    end_index = len(lines)
+    for index in range(start_index + 1, len(lines)):
+        if lines[index].lstrip().startswith("["):
+            end_index = index
+            break
+
+    return start_index, end_index
+
+
+def detect_newline(lines):
+    for line in lines:
+        if line.endswith("\r\n"):
+            return "\r\n"
+        if line.endswith("\n"):
+            return "\n"
+    return "\n"
+
+
+def set_section_value(config, section, key, value):
+    lines = split_lines_with_endings(config)
+    start_index, end_index = find_section_bounds(lines, section)
+    newline = detect_newline(lines)
+    key_prefix = re.compile(rf"^(\s*{re.escape(key)}\s*=\s*)")
+
+    for index in range(start_index + 1, end_index):
+        match = key_prefix.match(lines[index])
+        if match:
+            suffix = newline if lines[index].endswith(("\n", "\r\n")) else ""
+            lines[index] = f"{match.group(1)}{value}{suffix}"
+            return "".join(lines)
+
+    insert_at = end_index
+    lines.insert(insert_at, f"{key} = {value}{newline}")
+    return "".join(lines)
+
+
+def get_section_value(config, section, key):
+    lines = split_lines_with_endings(config)
+    start_index, end_index = find_section_bounds(lines, section)
+    key_prefix = re.compile(rf"^\s*{re.escape(key)}\s*=\s*(.*?)\s*$")
+
+    for index in range(start_index + 1, end_index):
+        match = key_prefix.match(lines[index].rstrip("\r\n"))
+        if match:
+            return match.group(1)
+
+    return None
+
+
+def apply_video_profile(config, section, width, height, frame_rate=None, rc_mode=None, gop=None):
+    config = set_section_value(config, section, "max_width", width)
+    config = set_section_value(config, section, "max_height", height)
+    config = set_section_value(config, section, "width", width)
+    config = set_section_value(config, section, "height", height)
+
+    if frame_rate is not None:
+        config = set_section_value(config, section, "src_frame_rate_num", frame_rate)
+        config = set_section_value(config, section, "dst_frame_rate_num", frame_rate)
+
+    if rc_mode is not None:
+        config = set_section_value(config, section, "rc_mode", rc_mode)
+
+    if gop is not None:
+        config = set_section_value(config, section, "gop", gop)
+
+    return config
+
+
+def set_encoder_flags(config, enable_venc_0=True, enable_venc_1=True, enable_venc_2=False):
+    config = set_section_value(config, "video.source", "enable_venc_0", "1" if enable_venc_0 else "0")
+    config = set_section_value(config, "video.source", "enable_venc_1", "1" if enable_venc_1 else "0")
+    config = set_section_value(config, "video.source", "enable_venc_2", "1" if enable_venc_2 else "0")
+    config = set_section_value(config, "video.source", "enable_rtsp", "1")
+    return config
+
 def patch_rkipc_ini(mode="native", resolution="720"):
     print(f"\n🛠️ 正在注入配置: [模式={mode}] [分辨率={resolution}P]...")
     ini_path = "/userdata/rkipc.ini"
@@ -10,42 +102,86 @@ def patch_rkipc_ini(mode="native", resolution="720"):
             config = f.read()
 
         # 1. 动态注入分辨率
-        w, h = ("1920", "1080") if resolution == "1080" else ("1280", "720")
-        config = re.sub(r"max_width\s*=\s*\d+", f"max_width = {w}", config)
-        config = re.sub(r"max_height\s*=\s*\d+", f"max_height = {h}", config)
-        config = re.sub(r"width\s*=\s*\d+", f"width = {w}", config)
-        config = re.sub(r"height\s*=\s*\d+", f"height = {h}", config)
-
-        # 2. 降温配置: 强制 15 帧, 动态码率 VBR
-        config = re.sub(r"dst_frame_rate_num\s*=\s*\d+", "dst_frame_rate_num = 15", config)
-        config = re.sub(r"src_frame_rate_num\s*=\s*\d+", "src_frame_rate_num = 15", config)
-        config = re.sub(r"rc_mode\s*=\s*\w+", "rc_mode = VBR", config)
-        #强制设置 GOP，确保每秒都有关键帧，拯救 FFmpeg 的切片强迫症！
-        config = re.sub(r"gop\s*=\s*\d+", "gop = 15", config)
-
-        # 3. 核心：双模切换逻辑
-        if mode == "native":
-            # 开启 rkipc 原生麦克风采集，关闭降噪滤镜防崩溃
-            config = re.sub(r"\[audio\.0\]\n*enable\s*=\s*\d+", "[audio.0]\nenable = 1", config)
-            config = re.sub(r"enable_vqe\s*=\s*\d+", "enable_vqe = 0", config)
-            
-            # 👇 核心修复 1：向固件妥协！因为板子不支持 AAC，必须退回 G711A (8000Hz 单声道)
-            config = re.sub(r"encode_type\s*=\s*\w+", "encode_type = G711A", config)
-            config = re.sub(r"sample_rate\s*=\s*\d+", "sample_rate = 8000", config)
-            config = re.sub(r"channels\s*=\s*\d+", "channels = 1", config)
-            config = re.sub(r"bit_rate\s*=\s*\d+", "bit_rate = 16000", config)
-            config = re.sub(r"frame_size\s*=\s*\d+", "frame_size = 1152", config)
-            
-            # 👇 核心修复 2：强迫 Muxer 把音频轨道写进 MP4！
-            config = re.sub(r"\[storage\.0\]\n*enable\s*=\s*\d+", "[storage.0]\nenable = 1\nrecord_audio = 1", config)
-            config = re.sub(r"file_duration\s*=\s*\d+", "file_duration = 30", config)
+        if resolution == "1080":
+            main_width, main_height = "1920", "1080"
         else:
-            # ffmpeg 模式: 阉割 rkipc 的麦克风和存储，留给外部 FFmpeg 独占
-            config = re.sub(r"\[audio\.0\]\n*enable\s*=\s*\d+", "[audio.0]\nenable = 0", config)
-            config = re.sub(r"\[storage\.0\]\n*enable\s*=\s*\d+", "[storage.0]\nenable = 0", config)
+            main_width, main_height = "1280", "720"
+
+        config = apply_video_profile(
+            config,
+            "video.0",
+            main_width,
+            main_height,
+            frame_rate="15",
+            rc_mode="VBR",
+            gop="15",
+        )
+        config = apply_video_profile(
+            config,
+            "video.1",
+            main_width,
+            main_height,
+            frame_rate="15",
+            rc_mode="VBR",
+            gop="15",
+        )
+        config = apply_video_profile(config, "video.2", "960", "540")
+        config = set_encoder_flags(config, enable_venc_0=True, enable_venc_1=True, enable_venc_2=False)
+
+        def apply_audio_profile(
+            enable_audio,
+            enable_storage,
+            record_audio=None,
+            sample_rate="8000",
+            channels="1",
+            frame_size="1152",
+            bit_rate="16000",
+        ):
+            nonlocal config
+            config = set_section_value(config, "audio.0", "enable", "1" if enable_audio else "0")
+            config = set_section_value(config, "audio.0", "enable_vqe", "0")
+            config = set_section_value(config, "audio.0", "encode_type", "G711A")
+            config = set_section_value(config, "audio.0", "sample_rate", sample_rate)
+            config = set_section_value(config, "audio.0", "channels", channels)
+            config = set_section_value(config, "audio.0", "bit_rate", bit_rate)
+            config = set_section_value(config, "audio.0", "frame_size", frame_size)
+            config = set_section_value(config, "storage.0", "enable", "1" if enable_storage else "0")
+            if record_audio is not None:
+                config = set_section_value(config, "storage.0", "record_audio", "1" if record_audio else "0")
+
+        # 3. 核心：按场景切换底层音频/存储策略
+        if mode == "native":
+            apply_audio_profile(enable_audio=True, enable_storage=True, record_audio=True)
+            config = set_section_value(config, "storage.0", "file_duration", "30")
+        elif mode == "live":
+            apply_audio_profile(
+                enable_audio=True,
+                enable_storage=False,
+                record_audio=False,
+                sample_rate="8000",
+                channels="1",
+                frame_size="1152",
+                bit_rate="16000",
+            )
+        else:
+            apply_audio_profile(enable_audio=False, enable_storage=False, record_audio=False)
 
         with open(ini_path, "w") as f:
             f.write(config)
+
+        print(
+            "🔍 生效配置: "
+            f"audio.enable={get_section_value(config, 'audio.0', 'enable')}, "
+            f"audio.encode_type={get_section_value(config, 'audio.0', 'encode_type')}, "
+            f"audio.sample_rate={get_section_value(config, 'audio.0', 'sample_rate')}, "
+            f"audio.channels={get_section_value(config, 'audio.0', 'channels')}, "
+            f"storage.enable={get_section_value(config, 'storage.0', 'enable')}, "
+            f"storage.record_audio={get_section_value(config, 'storage.0', 'record_audio')}, "
+            f"venc0={get_section_value(config, 'video.source', 'enable_venc_0')}, "
+            f"venc1={get_section_value(config, 'video.source', 'enable_venc_1')}, "
+            f"video.0={get_section_value(config, 'video.0', 'width')}x{get_section_value(config, 'video.0', 'height')}@{get_section_value(config, 'video.0', 'dst_frame_rate_num')}, "
+            f"video.1={get_section_value(config, 'video.1', 'width')}x{get_section_value(config, 'video.1', 'height')}@{get_section_value(config, 'video.1', 'dst_frame_rate_num')}"
+        )
             
         print("✅ 完美！系统底层已重构完毕。")
     except Exception as e:
@@ -55,7 +191,7 @@ if __name__ == "__main__":
     work_mode = sys.argv[1] if len(sys.argv) > 1 else "native"
     target_res = sys.argv[2] if len(sys.argv) > 2 else "720"
     
-    if work_mode not in ["native", "ffmpeg"]:
+    if work_mode not in ["native", "ffmpeg", "live"]:
         work_mode = "native"
     if target_res not in ["720", "1080"]:
         target_res = "720"
